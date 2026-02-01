@@ -2,6 +2,7 @@
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/node": "^25.0.10",
+    "drizzle-kit": "^0.31.8",
     "typescript": "^5.9.3"
   },
   "name": "http-server",
@@ -9,7 +10,9 @@
   "type": "module",
   "main": "index.js",
   "dependencies": {
+    "drizzle-orm": "^0.45.1",
     "express": "^5.2.1",
+    "postgres": "^3.4.8",
     "undici-types": "^7.16.0"
   },
   "scripts": {
