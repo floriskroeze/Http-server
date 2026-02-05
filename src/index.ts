@@ -4,9 +4,9 @@ import {config} from "./config.js";
 import postgres from "postgres";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import { drizzle } from "drizzle-orm/postgres-js";
-import {createUser, deleteAllUsers} from "./db/queries/users.js";
-import {NewUser} from "./db/schema";
+import {createUser, deleteAllUsers, NewUserResponse} from "./db/queries/users.js";
 import {createChirp, getChirpById, getChirps} from "./db/queries/chirps.js";
+import {hashPassword} from "./auth";
 
 const migrationClient = postgres(config.db.url, { max: 1 });
 await migrate(drizzle(migrationClient), config.db.migrationConfig);
@@ -40,6 +40,7 @@ app.get(`/api/chirps/:chirpId`, async (req, res, next) => {
 
 app.post("/admin/reset", handleReset);
 app.post("/api/users", handleUsers);
+app.post("/api/users/login", handleLogin);
 app.post("/api/chirps", async (req, res, next) => {
 	try {
 		await handleChirps(req, res);
@@ -86,16 +87,28 @@ async function handleReset(req: Request, res: Response) {
 }
 
 async function handleUsers(req: Request, res: Response) {
-	const params: NewUser = req.body
+	type parameters = {
+		email: string;
+		password: string;
+	}
+	const params: parameters = req.body
 
 	if (!params.email) {
 		return res.status(400).json({ error: "Email is required" });
 	}
 
-	try {
-		const user = await createUser(params);
+	if (!params.password) {
+		return res.status(400).json({ error: "Password is required" });
+	}
 
-		console.log(user);
+
+	try {
+		const hashedPassword = await hashPassword(params.password);
+		let user: NewUserResponse| {} = {};
+
+		if (hashedPassword) {
+			user = await createUser({email: params.email, hashed_password: hashedPassword})
+		}
 
 		if (user) {
 			console.log("User created:", user);
@@ -106,6 +119,21 @@ async function handleUsers(req: Request, res: Response) {
 
 	} catch (error) {
 		return res.status(500).json({ error: "Internal server error" });
+	}
+}
+
+async function handleLogin(req: Request, res: Response) {
+	type parameters = {
+		email: string;
+		password: string;
+	}
+
+	const params: parameters = req.params;
+
+	try {
+
+	} catch (e) {
+		
 	}
 }
 
