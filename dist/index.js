@@ -1,6 +1,13 @@
 import express from "express";
 import { NotFoundError, BadRequestError, UnauthorizedError, ForbiddenError } from "./error/Error.js";
 import { config } from "./config.js";
+import postgres from "postgres";
+import { migrate } from "drizzle-orm/postgres-js/migrator";
+import { drizzle } from "drizzle-orm/postgres-js";
+import { createUser, deleteAllUsers } from "./db/queries/users.js";
+import { createChirp, getChirpById, getChirps } from "./db/queries/chirps.js";
+const migrationClient = postgres(config.db.url, { max: 1 });
+await migrate(drizzle(migrationClient), config.db.migrationConfig);
 const app = express();
 const PORT = 8080;
 app.use(express.json());
@@ -10,10 +17,27 @@ app.use("/app", middlewareMetricsInc);
 app.use("/app", express.static("./app"));
 app.get("/api/healthz", handleHealthz);
 app.get("/admin/metrics", handleMetrics);
-app.post("/admin/reset", handleReset);
-app.post("/api/validate_chirp", async (req, res, next) => {
+app.get("/api/chirps", async (req, res, next) => {
     try {
-        await handleValidateChirp(req, res);
+        await handleGetAllChirps(req, res);
+    }
+    catch (err) {
+        next(err);
+    }
+});
+app.get(`/api/chirps/:chirpId`, async (req, res, next) => {
+    try {
+        await handleGetChirpById(req, res);
+    }
+    catch (err) {
+        next(err);
+    }
+});
+app.post("/admin/reset", handleReset);
+app.post("/api/users", handleUsers);
+app.post("/api/chirps", async (req, res, next) => {
+    try {
+        await handleChirps(req, res);
     }
     catch (err) {
         next(err);
@@ -31,33 +55,75 @@ function handleMetrics(req, res) {
 			<html>
 			  <body>
 				<h1>Welcome, Chirpy Admin</h1>
-				<p>Chirpy has been visited ${config.fileserverHits} times!</p>
+				<p>Chirpy has been visited ${config.api.fileserverHits} times!</p>
 			  </body>
 			</html>
 		`);
 }
-function handleReset(req, res) {
-    config.fileserverHits = 0;
+async function handleReset(req, res) {
+    if (config.api.platform !== "dev")
+        throw new ForbiddenError("Forbidden");
+    try {
+        await deleteAllUsers();
+    }
+    catch (e) {
+        console.log(e);
+    }
+    config.api.fileserverHits = 0;
     return res
         .status(200)
         .set('Content-Type', 'text/plain; charset=utf-8')
-        .send("fileserverHits reseted to 0");
+        .send("fileserverHits reseted to 0 and users deleted");
 }
-function handleHealthz(req, res) {
-    return res
-        .status(200)
-        .set('Content-Type', 'text/plain; charset=utf-8')
-        .send("OK");
+async function handleUsers(req, res) {
+    const params = req.body;
+    if (!params.email) {
+        return res.status(400).json({ error: "Email is required" });
+    }
+    try {
+        const user = await createUser(params);
+        console.log(user);
+        if (user) {
+            console.log("User created:", user);
+            return res.status(201).json(user);
+        }
+        return res.status(500).json({ error: "Failed to create user" });
+    }
+    catch (error) {
+        return res.status(500).json({ error: "Internal server error" });
+    }
 }
-async function handleValidateChirp(req, res) {
+async function handleGetAllChirps(req, res) {
+    try {
+        const chirps = await getChirps();
+        if (chirps) {
+            return res.status(200).json(chirps);
+        }
+        return res.status(500).json({ error: "Failed to fetch chirps" });
+    }
+    catch (e) {
+        return res.status(500).json({ error: "Internal server error" });
+    }
+}
+async function handleGetChirpById(req, res) {
+    const { chirpId } = req.params;
+    try {
+        const chirp = await getChirpById(chirpId);
+        if (chirp) {
+            return res.status(200).json(chirp);
+        }
+    }
+    catch (e) {
+        throw new NotFoundError("Chirp not found");
+    }
+}
+async function handleChirps(req, res) {
     const forbiddenWords = [
         'kerfuffle',
         'sharbert',
         'fornax'
     ];
     const params = req.body;
-    let respBody = {};
-    let statusCode = 200;
     if (params.body.length > 140) {
         throw new BadRequestError("Chirp is too long. Max length is 140");
     }
@@ -70,19 +136,33 @@ async function handleValidateChirp(req, res) {
             return word;
         });
         cleanedBody = filteredWordArray.join(" ");
-        respBody = {
-            "valid": true,
-            "cleanedBody": cleanedBody
-        };
+        try {
+            const chirp = await createChirp({ body: cleanedBody, user_id: params.userId });
+            const resJson = {
+                id: chirp.id,
+                body: chirp.body,
+                userId: chirp.user_id
+            };
+            if (chirp) {
+                console.log("Chirp created:", chirp);
+                return res.status(201).json(resJson);
+            }
+            return res.status(500).json({ error: "Failed to create user" });
+        }
+        catch (error) {
+            return res.status(500).json({ error: "Internal server error" });
+        }
     }
-    res
-        .status(statusCode)
-        .set("Content-Type", "application/json")
-        .send(JSON.stringify(respBody));
+}
+function handleHealthz(req, res) {
+    return res
+        .status(200)
+        .set('Content-Type', 'text/plain; charset=utf-8')
+        .send("OK");
 }
 function middlewareMetricsInc(req, res, next) {
-    config.fileserverHits++;
-    console.log(config.fileserverHits);
+    config.api.fileserverHits++;
+    console.log(config.api.fileserverHits);
     next();
 }
 function middlewareLogRequests(req, res, next) {
@@ -99,13 +179,13 @@ function middlewareLogResponses(req, res, next) {
 }
 function errorHandler(err, req, res, next) {
     if (err instanceof NotFoundError) {
-        return res.status(404).send("Not found");
+        return res.status(404).send({ "error": "Not found" });
     }
     else if (err instanceof ForbiddenError) {
-        return res.status(403).send("Forbidden");
+        return res.status(403).send({ "error": "Forbidden" });
     }
     else if (err instanceof UnauthorizedError) {
-        return res.status(402).send("Unauthorized request");
+        return res.status(402).send({ "error": "Unauthorized request" });
     }
     else if (err instanceof BadRequestError) {
         return res.status(400).send({ "error": err.message });

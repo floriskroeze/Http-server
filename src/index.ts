@@ -1,6 +1,15 @@
 import express, {Request, Response, NextFunction} from "express";
 import {NotFoundError, BadRequestError, UnauthorizedError, ForbiddenError} from "./error/Error.js";
 import {config} from "./config.js";
+import postgres from "postgres";
+import { migrate } from "drizzle-orm/postgres-js/migrator";
+import { drizzle } from "drizzle-orm/postgres-js";
+import {createUser, deleteAllUsers} from "./db/queries/users.js";
+import {NewUser} from "./db/schema";
+import {createChirp, getChirpById, getChirps} from "./db/queries/chirps.js";
+
+const migrationClient = postgres(config.db.url, { max: 1 });
+await migrate(drizzle(migrationClient), config.db.migrationConfig);
 
 const app = express();
 const PORT = 8080;
@@ -13,11 +22,27 @@ app.use("/app", express.static("./app"));
 
 app.get("/api/healthz", handleHealthz);
 app.get("/admin/metrics", handleMetrics);
+app.get("/api/chirps", async (req, res, next) => {
+	try {
+		await handleGetAllChirps(req, res);
+	} catch (err) {
+		next(err);
+	}
+});
+
+app.get(`/api/chirps/:chirpId`, async (req, res, next) => {
+	try {
+		await handleGetChirpById(req, res);
+	} catch (err) {
+		next(err);
+	}
+});
 
 app.post("/admin/reset", handleReset);
-app.post("/api/validate_chirp", async (req, res, next) => {
+app.post("/api/users", handleUsers);
+app.post("/api/chirps", async (req, res, next) => {
 	try {
-		await handleValidateChirp(req, res);
+		await handleChirps(req, res);
 	} catch (err) {
 		next(err);
 	}
@@ -37,19 +62,131 @@ function handleMetrics(req: Request, res: Response) {
 			<html>
 			  <body>
 				<h1>Welcome, Chirpy Admin</h1>
-				<p>Chirpy has been visited ${config.fileserverHits} times!</p>
+				<p>Chirpy has been visited ${config.api.fileserverHits} times!</p>
 			  </body>
 			</html>
 		`);
 }
 
-function handleReset(req: Request, res: Response) {
-	config.fileserverHits = 0;
+async function handleReset(req: Request, res: Response) {
+	if (config.api.platform !== "dev") throw new ForbiddenError("Forbidden");
+
+	try {
+		await deleteAllUsers();
+	} catch (e) {
+		console.log(e);
+	}
+
+	config.api.fileserverHits = 0;
 
 	return res
 		.status(200)
 		.set('Content-Type', 'text/plain; charset=utf-8')
-		.send("fileserverHits reseted to 0");
+		.send("fileserverHits reseted to 0 and users deleted");
+}
+
+async function handleUsers(req: Request, res: Response) {
+	const params: NewUser = req.body
+
+	if (!params.email) {
+		return res.status(400).json({ error: "Email is required" });
+	}
+
+	try {
+		const user = await createUser(params);
+
+		console.log(user);
+
+		if (user) {
+			console.log("User created:", user);
+			return res.status(201).json(user);
+		}
+
+		return res.status(500).json({ error: "Failed to create user" });
+
+	} catch (error) {
+		return res.status(500).json({ error: "Internal server error" });
+	}
+}
+
+async function handleGetAllChirps(req: Request, res: Response) {
+	try {
+		const chirps = await getChirps();
+
+		if (chirps) {
+			return res.status(200).json(chirps);
+		}
+
+		return res.status(500).json({ error: "Failed to fetch chirps" });
+
+	} catch (e) {
+		return res.status(500).json({ error: "Internal server error" });
+	}
+}
+
+async function handleGetChirpById(req: Request<{chirpId: string}>, res: Response) {
+	const {chirpId} = req.params;
+
+	try {
+		const chirp = await getChirpById(chirpId);
+
+		if (chirp) {
+			return res.status(200).json(chirp);
+		}
+	} catch (e) {
+		throw new NotFoundError("Chirp not found");
+	}
+}
+
+async function handleChirps(req: Request, res: Response) {
+	type Parameters = {
+		"body": string;
+		"userId": string;
+	};
+
+	const forbiddenWords = [
+		'kerfuffle',
+		'sharbert',
+		'fornax'
+	]
+
+	const params: Parameters = req.body;
+
+	if (params.body.length > 140) {
+		throw new BadRequestError("Chirp is too long. Max length is 140");
+	} else {
+		let cleanedBody = "";
+
+		const filteredWordArray = params.body.split(' ').map((word) => {
+			if (forbiddenWords.includes(word.toLowerCase())) {
+				return "****";
+			}
+
+			return word;
+		});
+
+		cleanedBody = filteredWordArray.join(" ");
+
+		try {
+			const chirp = await createChirp({body: cleanedBody, user_id: params.userId});
+
+			const resJson = {
+				id: chirp.id,
+				body: chirp.body,
+				userId: chirp.user_id
+			}
+
+			if (chirp) {
+				console.log("Chirp created:", chirp);
+				return res.status(201).json(resJson);
+			}
+
+			return res.status(500).json({ error: "Failed to create user" });
+
+		} catch (error) {
+			return res.status(500).json({ error: "Internal server error" });
+		}
+	}
 }
 
 function handleHealthz(req: Request, res: Response) {
@@ -59,51 +196,9 @@ function handleHealthz(req: Request, res: Response) {
 		.send("OK");
 }
 
-async function handleValidateChirp(req: Request, res: Response) {
-		type parameters = {
-			body: string;
-		};
-
-		const forbiddenWords = [
-			'kerfuffle',
-			'sharbert',
-			'fornax'
-		]
-
-		const params: parameters = req.body;
-		let respBody = {};
-		let statusCode = 200;
-
-		if (params.body.length > 140) {
-			throw new BadRequestError("Chirp is too long. Max length is 140");
-		} else {
-			let cleanedBody = "";
-
-			const filteredWordArray = params.body.split(' ').map((word) => {
-				if (forbiddenWords.includes(word.toLowerCase())) {
-					return "****";
-				}
-
-				return word;
-			});
-
-			cleanedBody = filteredWordArray.join(" ");
-
-			respBody = {
-				"valid": true,
-				"cleanedBody": cleanedBody
-			};
-		}
-
-		res
-			.status(statusCode)
-			.set("Content-Type", "application/json")
-			.send(JSON.stringify(respBody));
-}
-
 function middlewareMetricsInc(req: Request, res: Response, next: NextFunction) {
-	config.fileserverHits ++;
-	console.log(config.fileserverHits);
+	config.api.fileserverHits ++;
+	console.log(config.api.fileserverHits);
 	next();
 }
 
