@@ -4,8 +4,9 @@ import { config } from "./config.js";
 import postgres from "postgres";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import { drizzle } from "drizzle-orm/postgres-js";
-import { createUser, deleteAllUsers } from "./db/queries/users.js";
+import { createUser, deleteAllUsers, getUserByEmail } from "./db/queries/users.js";
 import { createChirp, getChirpById, getChirps } from "./db/queries/chirps.js";
+import { checkPasswordHash, hashPassword } from "./auth.js";
 const migrationClient = postgres(config.db.url, { max: 1 });
 await migrate(drizzle(migrationClient), config.db.migrationConfig);
 const app = express();
@@ -35,6 +36,14 @@ app.get(`/api/chirps/:chirpId`, async (req, res, next) => {
 });
 app.post("/admin/reset", handleReset);
 app.post("/api/users", handleUsers);
+app.post("/api/login", async (req, res, next) => {
+    try {
+        await handleLogin(req, res);
+    }
+    catch (err) {
+        next(err);
+    }
+});
 app.post("/api/chirps", async (req, res, next) => {
     try {
         await handleChirps(req, res);
@@ -80,9 +89,15 @@ async function handleUsers(req, res) {
     if (!params.email) {
         return res.status(400).json({ error: "Email is required" });
     }
+    if (!params.password) {
+        return res.status(400).json({ error: "Password is required" });
+    }
     try {
-        const user = await createUser(params);
-        console.log(user);
+        const hashedPassword = await hashPassword(params.password);
+        let user = {};
+        if (hashedPassword) {
+            user = await createUser({ email: params.email, hashed_password: hashedPassword });
+        }
         if (user) {
             console.log("User created:", user);
             return res.status(201).json(user);
@@ -91,6 +106,36 @@ async function handleUsers(req, res) {
     }
     catch (error) {
         return res.status(500).json({ error: "Internal server error" });
+    }
+}
+async function handleLogin(req, res) {
+    const { email, password } = req.body;
+    if (!email) {
+        return res.status(400).json({ error: "Email is required" });
+    }
+    if (!password) {
+        return res.status(400).json({ error: "Password is required" });
+    }
+    try {
+        const user = await getUserByEmail(email);
+        console.log(user);
+        if (user) {
+            const isValidLogin = await checkPasswordHash(password, user.hashed_password);
+            if (isValidLogin) {
+                return res.status(200).json({
+                    id: user.id,
+                    createdAt: user.createdAt,
+                    updatedAt: user.updatedAt,
+                    email: user.email
+                });
+            }
+            else {
+                throw new UnauthorizedError("");
+            }
+        }
+    }
+    catch (e) {
+        throw new UnauthorizedError("");
     }
 }
 async function handleGetAllChirps(req, res) {
@@ -185,7 +230,7 @@ function errorHandler(err, req, res, next) {
         return res.status(403).send({ "error": "Forbidden" });
     }
     else if (err instanceof UnauthorizedError) {
-        return res.status(402).send({ "error": "Unauthorized request" });
+        return res.status(401).send({ "error": "Unauthorized request" });
     }
     else if (err instanceof BadRequestError) {
         return res.status(400).send({ "error": err.message });

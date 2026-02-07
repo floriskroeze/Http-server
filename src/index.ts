@@ -4,9 +4,10 @@ import {config} from "./config.js";
 import postgres from "postgres";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import { drizzle } from "drizzle-orm/postgres-js";
-import {createUser, deleteAllUsers, NewUserResponse} from "./db/queries/users.js";
+import {createUser, deleteAllUsers, getUserByEmail, NewUserResponse} from "./db/queries/users.js";
 import {createChirp, getChirpById, getChirps} from "./db/queries/chirps.js";
-import {hashPassword} from "./auth";
+import {checkPasswordHash, hashPassword} from "./auth.js";
+import jwt, {JwtPayload} from "jsonwebtoken";
 
 const migrationClient = postgres(config.db.url, { max: 1 });
 await migrate(drizzle(migrationClient), config.db.migrationConfig);
@@ -40,7 +41,13 @@ app.get(`/api/chirps/:chirpId`, async (req, res, next) => {
 
 app.post("/admin/reset", handleReset);
 app.post("/api/users", handleUsers);
-app.post("/api/users/login", handleLogin);
+app.post("/api/login", async (req: Request<{ email: string, password: string }>, res, next) => {
+	try {
+		await handleLogin(req, res);
+	} catch (err) {
+		next(err);
+	}
+});
 app.post("/api/chirps", async (req, res, next) => {
 	try {
 		await handleChirps(req, res);
@@ -122,18 +129,37 @@ async function handleUsers(req: Request, res: Response) {
 	}
 }
 
-async function handleLogin(req: Request, res: Response) {
-	type parameters = {
-		email: string;
-		password: string;
+async function handleLogin(req: Request<{password: string, email: string}>, res: Response) {
+	const {email, password} = req.body;
+
+	if (!email) {
+		return res.status(400).json({ error: "Email is required" });
 	}
 
-	const params: parameters = req.params;
+	if (!password) {
+		return res.status(400).json({ error: "Password is required" });
+	}
 
 	try {
+		const user = await getUserByEmail(email);
+		console.log(user);
 
+		if (user) {
+			const isValidLogin = await checkPasswordHash(password, user.hashed_password);
+
+			if (isValidLogin) {
+				return res.status(200).json({
+					id: user.id,
+					createdAt: user.createdAt,
+					updatedAt: user.updatedAt,
+					email: user.email
+				});
+			} else {
+				throw new UnauthorizedError("");
+			}
+		}
 	} catch (e) {
-		
+		throw new UnauthorizedError("");
 	}
 }
 
@@ -255,7 +281,7 @@ function errorHandler(
 	} else if (err instanceof ForbiddenError) {
 		return res.status(403).send({"error": "Forbidden"});
 	} else if (err instanceof UnauthorizedError) {
-		return res.status(402).send({"error": "Unauthorized request"});
+		return res.status(401).send({"error": "Unauthorized request"});
 	} else if (err instanceof BadRequestError) {
 		return res.status(400).send({"error": err.message});
 	} else {
