@@ -1,6 +1,6 @@
 import { db } from "../index.js";
-import {chirps, NewUser, users} from "../schema.js";
-import {asc, eq} from "drizzle-orm";
+import {NewUser, users} from "../schema.js";
+import {eq} from "drizzle-orm";
 
 export type NewUserResponse = Omit<NewUser, "password">
 

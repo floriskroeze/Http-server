@@ -8,7 +8,8 @@ function envOrThrow(key) {
 }
 const api = {
     fileserverHits: 0,
-    platform: envOrThrow("PLATFORM")
+    platform: envOrThrow("PLATFORM"),
+    secret: envOrThrow("SECRET")
 };
 const migrationConfig = {
     migrationsFolder: "./src/db/migrations"

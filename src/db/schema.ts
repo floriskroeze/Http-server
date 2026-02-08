@@ -1,4 +1,5 @@
-import { pgTable, timestamp, varchar, uuid } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import {pgTable, timestamp, varchar, uuid, primaryKey} from "drizzle-orm/pg-core";
 
 export const users = pgTable("users", {
     id: uuid("id").primaryKey().defaultRandom(),
@@ -25,3 +26,17 @@ export const chirps = pgTable("chirps", {
 });
 
 export type NewChirp = typeof chirps.$inferInsert;
+
+export const refresh_tokens = pgTable("refresh_tokens", {
+    token: varchar("token").primaryKey(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at")
+        .notNull()
+        .defaultNow()
+        .$onUpdate(() => new Date()),
+    user_id: uuid("user_id").references(() => users.id, {onDelete: 'cascade'}).notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+    revokedAt: timestamp("revoked_at")
+});
+
+export type NewRefreshToken = typeof refresh_tokens.$inferInsert;

@@ -1,6 +1,10 @@
 import {hash, verify} from "argon2";
 import jwt, {JwtPayload} from "jsonwebtoken";
 import {UnauthorizedError} from "./error/Error.js";
+import {Request} from "express";
+import * as crypto from "node:crypto";
+import {createRefreshToken} from "./db/queries/refresh_tokens.js";
+
 
 export async function hashPassword(password: string) {
     try {
@@ -48,13 +52,41 @@ export function makeJWT(userID: string, expiresIn: number, secret: string): stri
 }
 
 export function getBearerToken(req: Request): string {
-    const authHeader = req.headers.get('authorization');
+    const authHeader = req.get('authorization');
+
+    console.log("Auth header: " + authHeader)
+
     const [scheme, token] = authHeader?.split(' ') ?? [];
 
     if (scheme !== 'Bearer' || !token) {
-        throw new UnauthorizedError("");
+        throw new UnauthorizedError("No bearer token found");
     }
 
     return token;
+}
+
+export async function makeRefreshToken(user_id: string) {
+    const token = crypto.randomBytes(32).toString('hex');
+
+    let currentDate = new Date();
+
+    currentDate.setDate(currentDate.getDate() + 60);
+
+    try {
+        const refreshToken =  await createRefreshToken({
+            token: token,
+            user_id: user_id,
+            expiresAt: currentDate
+        });
+
+        if (refreshToken) {
+            return token;
+        }
+
+        throw new Error("Something went wrong");
+
+    } catch (e) {
+        throw new Error("Something went wrong");
+    }
 }
 

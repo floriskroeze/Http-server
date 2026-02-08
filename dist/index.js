@@ -6,7 +6,8 @@ import { migrate } from "drizzle-orm/postgres-js/migrator";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { createUser, deleteAllUsers, getUserByEmail } from "./db/queries/users.js";
 import { createChirp, getChirpById, getChirps } from "./db/queries/chirps.js";
-import { checkPasswordHash, hashPassword } from "./auth.js";
+import { checkPasswordHash, getBearerToken, hashPassword, makeJWT, makeRefreshToken, validateJWT } from "./auth.js";
+import { getUserFromRefreshToken, revokeRefreshToken } from "./db/queries/refresh_tokens.js";
 const migrationClient = postgres(config.db.url, { max: 1 });
 await migrate(drizzle(migrationClient), config.db.migrationConfig);
 const app = express();
@@ -29,6 +30,22 @@ app.get("/api/chirps", async (req, res, next) => {
 app.get(`/api/chirps/:chirpId`, async (req, res, next) => {
     try {
         await handleGetChirpById(req, res);
+    }
+    catch (err) {
+        next(err);
+    }
+});
+app.post("/api/refresh", async (req, res, next) => {
+    try {
+        await handleRefresh(req, res);
+    }
+    catch (err) {
+        next(err);
+    }
+});
+app.post("/api/revoke", async (req, res, next) => {
+    try {
+        await handleRevoke(req, res);
     }
     catch (err) {
         next(err);
@@ -68,6 +85,45 @@ function handleMetrics(req, res) {
 			  </body>
 			</html>
 		`);
+}
+async function handleRefresh(req, res) {
+    const bearerToken = getBearerToken(req);
+    if (bearerToken) {
+        console.log(bearerToken);
+        try {
+            const user = await getUserFromRefreshToken(bearerToken);
+            if (user) {
+                const newAccessToken = makeJWT(user.user_id, 3600, config.api.secret);
+                return res
+                    .status(200)
+                    .send({
+                    token: newAccessToken
+                });
+            }
+            throw new UnauthorizedError("Unauthorized");
+        }
+        catch (e) {
+            throw new UnauthorizedError("Unauthorized");
+        }
+    }
+}
+async function handleRevoke(req, res) {
+    const bearerToken = getBearerToken(req);
+    console.log("Bearer token: " + bearerToken);
+    if (bearerToken) {
+        try {
+            const revokedToken = await revokeRefreshToken(bearerToken);
+            if (revokedToken) {
+                return res
+                    .status(204)
+                    .send();
+            }
+        }
+        catch (e) {
+            console.log("Error revoking token");
+            throw new BadRequestError("");
+        }
+    }
 }
 async function handleReset(req, res) {
     if (config.api.platform !== "dev")
@@ -121,21 +177,26 @@ async function handleLogin(req, res) {
         console.log(user);
         if (user) {
             const isValidLogin = await checkPasswordHash(password, user.hashed_password);
+            const expiresIn = 3600;
             if (isValidLogin) {
+                const token = makeJWT(user.id, expiresIn, config.api.secret);
+                const refreshToken = await makeRefreshToken(user.id);
                 return res.status(200).json({
                     id: user.id,
                     createdAt: user.createdAt,
                     updatedAt: user.updatedAt,
-                    email: user.email
+                    email: user.email,
+                    token: token,
+                    refreshToken: refreshToken
                 });
             }
             else {
-                throw new UnauthorizedError("");
+                throw new UnauthorizedError("Invalid login");
             }
         }
     }
     catch (e) {
-        throw new UnauthorizedError("");
+        throw new UnauthorizedError("Something went wrong");
     }
 }
 async function handleGetAllChirps(req, res) {
@@ -163,6 +224,14 @@ async function handleGetChirpById(req, res) {
     }
 }
 async function handleChirps(req, res) {
+    const bearerToken = getBearerToken(req);
+    if (!bearerToken) {
+        throw new UnauthorizedError("No bearer token found");
+    }
+    const validatedToken = validateJWT(bearerToken, config.api.secret);
+    if (!validatedToken) {
+        throw new UnauthorizedError("No validatedToken");
+    }
     const forbiddenWords = [
         'kerfuffle',
         'sharbert',
@@ -182,7 +251,7 @@ async function handleChirps(req, res) {
         });
         cleanedBody = filteredWordArray.join(" ");
         try {
-            const chirp = await createChirp({ body: cleanedBody, user_id: params.userId });
+            const chirp = await createChirp({ body: cleanedBody, user_id: validatedToken });
             const resJson = {
                 id: chirp.id,
                 body: chirp.body,
@@ -224,13 +293,13 @@ function middlewareLogResponses(req, res, next) {
 }
 function errorHandler(err, req, res, next) {
     if (err instanceof NotFoundError) {
-        return res.status(404).send({ "error": "Not found" });
+        return res.status(404).send({ "error": err.message });
     }
     else if (err instanceof ForbiddenError) {
-        return res.status(403).send({ "error": "Forbidden" });
+        return res.status(403).send({ "error": err.message });
     }
     else if (err instanceof UnauthorizedError) {
-        return res.status(401).send({ "error": "Unauthorized request" });
+        return res.status(401).send({ "error": err.message });
     }
     else if (err instanceof BadRequestError) {
         return res.status(400).send({ "error": err.message });

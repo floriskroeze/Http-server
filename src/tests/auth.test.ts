@@ -1,4 +1,5 @@
-import {describe, it, expect, beforeAll, assertType} from "vitest";
+import {describe, it, expect, beforeAll} from "vitest";
+import {Request} from "express";
 import {checkPasswordHash, getBearerToken, hashPassword, makeJWT, validateJWT} from "../auth.js";
 import {UnauthorizedError} from "../error/Error";
 
@@ -54,41 +55,61 @@ describe("JWT verifying", () => {
 });
 
 describe('getBearerToken (Strict)', () => {
-    it('should return the token when a valid Bearer header is provided', () => {
-        const req = new Request('https://api.test', {
-            headers: { 'Authorization': 'Bearer super-secret-123' }
-        });
+    // Cast the object to 'unknown' then 'Request' to satisfy TS
+    const mockReq = (authHeader?: string) => ({
+        get: (name: string) => {
+            if (name.toLowerCase() === 'authorization') return authHeader;
+            return undefined;
+        }
+    } as unknown as Request);
 
+    it('should return the token when a valid Bearer header is provided', () => {
+        const req = mockReq('Bearer super-secret-123');
+        // Now TS will allow passing 'req' into getBearerToken
         expect(getBearerToken(req)).toBe('super-secret-123');
     });
 
     it('should throw UnauthorizedError if the Authorization header is missing', () => {
-        const req = new Request('https://api.test');
+        const req: Request = mockReq(undefined);
 
-        expect(() => getBearerToken(req)).toThrow(UnauthorizedError);
+        try {
+            getBearerToken(req);
+            throw new Error('Should have thrown an error');
+        } catch (e) {
+            if (!(e instanceof UnauthorizedError)) throw e;
+        }
     });
 
     it('should throw if the scheme is not "Bearer"', () => {
-        const req = new Request('https://api.test', {
-            headers: { 'Authorization': 'Basic dXNlcjpwYXNz' }
-        });
+        const req = mockReq('Basic dXNlcjpwYXNz');
 
-        expect(() => getBearerToken(req)).toThrow(UnauthorizedError);
+        try {
+            getBearerToken(req);
+            throw new Error('Should have thrown an error');
+        } catch (e) {
+            if (!(e instanceof UnauthorizedError)) throw e;
+        }
     });
 
     it('should throw if the header is just the word "Bearer" without a token', () => {
-        const req = new Request('https://api.test', {
-            headers: { 'Authorization': 'Bearer ' }
-        });
+        const req = mockReq('Bearer ');
 
-        expect(() => getBearerToken(req)).toThrow(UnauthorizedError);
+        try {
+            getBearerToken(req);
+            throw new Error('Should have thrown an error');
+        } catch (e) {
+            if (!(e instanceof UnauthorizedError)) throw e;
+        }
     });
 
     it('should be case-sensitive for "Bearer" (or throw if lowercase)', () => {
-        const req = new Request('https://api.test', {
-            headers: { 'Authorization': 'bearer token123' }
-        });
+        const req = mockReq('bearer token123');
 
-        expect(() => getBearerToken(req)).toThrow(UnauthorizedError);
+        try {
+            getBearerToken(req);
+            throw new Error('Should have thrown an error');
+        } catch (e) {
+            if (!(e instanceof UnauthorizedError)) throw e;
+        }
     });
 });
