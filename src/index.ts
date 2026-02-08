@@ -4,7 +4,7 @@ import {config} from "./config.js";
 import postgres from "postgres";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import { drizzle } from "drizzle-orm/postgres-js";
-import {createUser, deleteAllUsers, getUserByEmail, NewUserResponse} from "./db/queries/users.js";
+import {createUser, deleteAllUsers, getUserByEmail, NewUserResponse, updateUserData} from "./db/queries/users.js";
 import {createChirp, getChirpById, getChirps} from "./db/queries/chirps.js";
 import {checkPasswordHash, getBearerToken, hashPassword, makeJWT, makeRefreshToken, validateJWT} from "./auth.js";
 import {getUserFromRefreshToken, revokeRefreshToken} from "./db/queries/refresh_tokens.js";
@@ -76,7 +76,15 @@ app.put("/api/users", async (req: Request<{email: string, password: string}>, re
 	} catch (err) {
 		next(err);
 	}
-})
+});
+
+app.delete("/api/chirps/:chirpId", async (req: Request<{chirpId: string}>, res: Response, next: NextFunction) => {
+	try {
+		await handleDeleteChirpById(req, res);
+	} catch (err) {
+		next(err);
+	}
+});
 
 app.use(errorHandler);
 
@@ -337,15 +345,39 @@ function handleHealthz(req: Request, res: Response) {
 
 async function handleUpdateUser(req: Request<{email: string, password: string}>, res: Response) {
 	const bearerToken = getBearerToken(req);
-	const {email, password} = req.params;
+	const {email, password} = req.body;
+
+	console.log()
 
 	if (!bearerToken) throw new UnauthorizedError("Unauthorized");
-	if (!email && !password) throw new BadRequestError("Missing data");
 
 	try {
-		const updatedUser = updateUserData()
-	} catch (e) {
+		const sub = validateJWT(bearerToken, config.api.secret);
 
+		if (sub) {
+			const hashed_password = await hashPassword(password);
+
+			if (hashed_password) {
+				const updatedUser = await updateUserData(sub, email, hashed_password);
+
+				return res.status(200).send({...updatedUser});
+			}
+		}
+	} catch (e) {
+		throw new UnauthorizedError("Unauthorized");
+	}
+}
+
+async function handleDeleteChirpById(req: Request<{ chirpId: string }>, res: Response) {
+	const {chirpId} = req.params;
+	const 
+
+	if (!chirpId) throw new BadRequestError("No chirpId found");
+
+	try {
+		const
+	} catch (e) {
+		throw new UnauthorizedError("Not authorized to delete chirp");
 	}
 }
 

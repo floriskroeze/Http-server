@@ -30,9 +30,9 @@ export function validateJWT(tokenString: string, secret: string): string {
             return token.sub;
         }
 
-        throw new UnauthorizedError("");
+        throw new UnauthorizedError("No token sub found");
     } catch (e) {
-        throw new UnauthorizedError("");
+        throw new UnauthorizedError("Cannot verify token");
     }
 }
 
@@ -53,9 +53,6 @@ export function makeJWT(userID: string, expiresIn: number, secret: string): stri
 
 export function getBearerToken(req: Request): string {
     const authHeader = req.get('authorization');
-
-    console.log("Auth header: " + authHeader)
-
     const [scheme, token] = authHeader?.split(' ') ?? [];
 
     if (scheme !== 'Bearer' || !token) {

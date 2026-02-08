@@ -4,7 +4,7 @@ import { config } from "./config.js";
 import postgres from "postgres";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import { drizzle } from "drizzle-orm/postgres-js";
-import { createUser, deleteAllUsers, getUserByEmail } from "./db/queries/users.js";
+import { createUser, deleteAllUsers, getUserByEmail, updateUserData } from "./db/queries/users.js";
 import { createChirp, getChirpById, getChirps } from "./db/queries/chirps.js";
 import { checkPasswordHash, getBearerToken, hashPassword, makeJWT, makeRefreshToken, validateJWT } from "./auth.js";
 import { getUserFromRefreshToken, revokeRefreshToken } from "./db/queries/refresh_tokens.js";
@@ -64,6 +64,14 @@ app.post("/api/login", async (req, res, next) => {
 app.post("/api/chirps", async (req, res, next) => {
     try {
         await handleChirps(req, res);
+    }
+    catch (err) {
+        next(err);
+    }
+});
+app.put("/api/users", async (req, res, next) => {
+    try {
+        await handleUpdateUser(req, res);
     }
     catch (err) {
         next(err);
@@ -273,6 +281,26 @@ function handleHealthz(req, res) {
         .status(200)
         .set('Content-Type', 'text/plain; charset=utf-8')
         .send("OK");
+}
+async function handleUpdateUser(req, res) {
+    const bearerToken = getBearerToken(req);
+    const { email, password } = req.body;
+    console.log();
+    if (!bearerToken)
+        throw new UnauthorizedError("Unauthorized");
+    try {
+        const sub = validateJWT(bearerToken, config.api.secret);
+        if (sub) {
+            const hashed_password = await hashPassword(password);
+            if (hashed_password) {
+                const updatedUser = await updateUserData(sub, email, hashed_password);
+                return res.status(200).send({ ...updatedUser });
+            }
+        }
+    }
+    catch (e) {
+        throw new UnauthorizedError("Unauthorized");
+    }
 }
 function middlewareMetricsInc(req, res, next) {
     config.api.fileserverHits++;
