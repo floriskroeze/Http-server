@@ -1,6 +1,6 @@
 import {describe, it, expect, beforeAll} from "vitest";
 import {Request} from "express";
-import {checkPasswordHash, getBearerToken, hashPassword, makeJWT, validateJWT} from "../auth.js";
+import {checkPasswordHash, getApiKey, getBearerToken, hashPassword, makeJWT, validateJWT} from "../auth.js";
 import {UnauthorizedError} from "../error/Error";
 
 describe("Password Hashing", () => {
@@ -111,5 +111,13 @@ describe('getBearerToken (Strict)', () => {
         } catch (e) {
             if (!(e instanceof UnauthorizedError)) throw e;
         }
+    });
+});
+
+describe( 'getApiKey', () => {
+    const header = 'ApiKey super-secret-123';
+
+    it('should return the key when a valid ApiKey header is provided', () => {
+        expect(getApiKey(header)).toBe('super-secret-123');
     });
 });

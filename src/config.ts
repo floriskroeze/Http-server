@@ -4,7 +4,8 @@ import {MigrationConfig} from "drizzle-orm/migrator";
 type APIConfig = {
 	fileserverHits: number;
 	platform: string;
-	secret: string
+	secret: string;
+	polkaKey: string;
 };
 
 type DBConfig = {
@@ -30,7 +31,8 @@ function envOrThrow(key: string) {
 const api: APIConfig = {
 	fileserverHits: 0,
 	platform: envOrThrow("PLATFORM"),
-	secret: envOrThrow("SECRET")
+	secret: envOrThrow("SECRET"),
+	polkaKey: envOrThrow("POLKA_KEY")
 };
 
 const migrationConfig: MigrationConfig = {

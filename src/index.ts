@@ -4,9 +4,23 @@ import {config} from "./config.js";
 import postgres from "postgres";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import { drizzle } from "drizzle-orm/postgres-js";
-import {createUser, deleteAllUsers, getUserByEmail, NewUserResponse, updateUserData} from "./db/queries/users.js";
-import {createChirp, getChirpById, getChirps} from "./db/queries/chirps.js";
-import {checkPasswordHash, getBearerToken, hashPassword, makeJWT, makeRefreshToken, validateJWT} from "./auth.js";
+import {
+	createUser,
+	deleteAllUsers,
+	getUserByEmail,
+	NewUserResponse,
+	updateUserData, upgradeUser
+} from "./db/queries/users.js";
+import {createChirp, deleteChirpbyId, getChirpById, getChirps} from "./db/queries/chirps.js";
+import {
+	checkPasswordHash,
+	getApiKey,
+	getBearerToken,
+	hashPassword,
+	makeJWT,
+	makeRefreshToken,
+	validateJWT
+} from "./auth.js";
 import {getUserFromRefreshToken, revokeRefreshToken} from "./db/queries/refresh_tokens.js";
 
 const migrationClient = postgres(config.db.url, { max: 1 });
@@ -49,6 +63,13 @@ app.post("/api/refresh", async (req: Request<{ email: string, password: string }
 app.post("/api/revoke", async (req: Request, res: Response, next: NextFunction)=> {
 	try {
 		await handleRevoke(req, res);
+	} catch (err) {
+		next(err);
+	}
+});
+app.post("/api/polka/webhooks", async (req: Request<{ event: string, data: { userId: string } }>, res, next) => {
+	try {
+		await handlePolkaWebhooks(req, res);
 	} catch (err) {
 		next(err);
 	}
@@ -186,7 +207,7 @@ async function handleUsers(req: Request, res: Response) {
 
 	try {
 		const hashedPassword = await hashPassword(params.password);
-		let user: NewUserResponse| {} = {};
+		let user: NewUserResponse | {} = {};
 
 		if (hashedPassword) {
 			user = await createUser({email: params.email, hashed_password: hashedPassword})
@@ -233,7 +254,8 @@ async function handleLogin(req: Request<{password: string, email: string}>, res:
 					updatedAt: user.updatedAt,
 					email: user.email,
 					token: token,
-					refreshToken: refreshToken
+					refreshToken: refreshToken,
+					isChirpyRed: user.isChirpyRed
 				});
 			} else {
 				throw new UnauthorizedError("Invalid login");
@@ -268,6 +290,8 @@ async function handleGetChirpById(req: Request<{chirpId: string}>, res: Response
 		if (chirp) {
 			return res.status(200).json(chirp);
 		}
+
+		return res.status(404).send();
 	} catch (e) {
 		throw new NotFoundError("Chirp not found");
 	}
@@ -347,8 +371,6 @@ async function handleUpdateUser(req: Request<{email: string, password: string}>,
 	const bearerToken = getBearerToken(req);
 	const {email, password} = req.body;
 
-	console.log()
-
 	if (!bearerToken) throw new UnauthorizedError("Unauthorized");
 
 	try {
@@ -370,14 +392,54 @@ async function handleUpdateUser(req: Request<{email: string, password: string}>,
 
 async function handleDeleteChirpById(req: Request<{ chirpId: string }>, res: Response) {
 	const {chirpId} = req.params;
-	const 
+	const bearerToken = getBearerToken(req);
 
+	if (!bearerToken) throw new UnauthorizedError("Unauthorized");
 	if (!chirpId) throw new BadRequestError("No chirpId found");
 
 	try {
-		const
+		const user = validateJWT(bearerToken, config.api.secret);
+
+		if (user) {
+			const deleteChirp = await deleteChirpbyId(user, chirpId);
+
+			if (deleteChirp) {
+				return res.status(204).send();
+			}
+
+			return res.status(403).send();
+		}
+
+		return res.status(404).send();
 	} catch (e) {
 		throw new UnauthorizedError("Not authorized to delete chirp");
+	}
+}
+
+async function handlePolkaWebhooks(req: Request<{ event: string, data: { userId: string } }>, res: Response) {
+	const authHeader = req.get('authorization');
+
+	if(!authHeader) throw new UnauthorizedError("No api key found");
+
+	const apikey = getApiKey(authHeader);
+
+	if (apikey !== config.api.polkaKey) throw new UnauthorizedError("Invalid api key");
+
+	const {event, data} = req.body;
+
+	if (event !== "user.upgraded") return res.status(204).send();
+	if (!data.userId) return res.status(404).send();
+
+	try {
+		const upgradedUser = await upgradeUser(data.userId);
+
+		if (upgradedUser) {
+			return res.status(204).send();
+		}
+
+		return res.status(404).send();
+	} catch (e) {
+		throw new NotFoundError("");
 	}
 }
 

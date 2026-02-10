@@ -13,8 +13,10 @@ export async function createUser(user: NewUser): Promise<NewUserResponse> {
             id: users.id,
             createdAt: users.createdAt,
             updatedAt: users.updatedAt,
-            email: users.email
+            email: users.email,
+            isChirpyRed: users.isChirpyRed
         });
+    console.log(result)
     return result;
 }
 
@@ -33,6 +35,11 @@ export async function updateUserData(id: string, email: string, hashed_password:
         email,
         hashed_password
     }
-    const [result] = await db.update(users).set(fieldsToSet).where(eq(users.id, id)).returning({id: users.id, email: users.email, createdAt: users.createdAt, updatedAt: users.updatedAt});
+    const [result] = await db.update(users).set(fieldsToSet).where(eq(users.id, id)).returning({id: users.id, email: users.email, createdAt: users.createdAt, updatedAt: users.updatedAt, isChirpyRed: users.isChirpyRed});
+    return result
+}
+
+export async function upgradeUser(userId: string) {
+    const [result] = await db.update(users).set({isChirpyRed: true}).where(eq(users.id, userId)).returning({id: users.id, email: users.email, createdAt: users.createdAt, updatedAt: users.updatedAt, isChirpyRed: users.isChirpyRed});
     return result
 }

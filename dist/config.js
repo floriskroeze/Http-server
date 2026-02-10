@@ -9,7 +9,8 @@ function envOrThrow(key) {
 const api = {
     fileserverHits: 0,
     platform: envOrThrow("PLATFORM"),
-    secret: envOrThrow("SECRET")
+    secret: envOrThrow("SECRET"),
+    polkaKey: envOrThrow("POLKA_KEY")
 };
 const migrationConfig = {
     migrationsFolder: "./src/db/migrations"

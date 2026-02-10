@@ -87,3 +87,13 @@ export async function makeRefreshToken(user_id: string) {
     }
 }
 
+export function getApiKey(authHeader: string) {
+
+    const [scheme, token] = authHeader?.split(' ') ?? [];
+
+    if (scheme !== 'ApiKey' || !token) {
+        throw new UnauthorizedError("No bearer token found");
+    }
+
+    return token;
+}
