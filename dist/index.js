@@ -5,7 +5,7 @@ import postgres from "postgres";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { createUser, deleteAllUsers, getUserByEmail, updateUserData, upgradeUser } from "./db/queries/users.js";
-import { createChirp, deleteChirpbyId, getChirpById, getChirps } from "./db/queries/chirps.js";
+import { createChirp, deleteChirpbyId, getChirpById, getChirps, getChirpsByAuthorId } from "./db/queries/chirps.js";
 import { checkPasswordHash, getApiKey, getBearerToken, hashPassword, makeJWT, makeRefreshToken, validateJWT } from "./auth.js";
 import { getUserFromRefreshToken, revokeRefreshToken } from "./db/queries/refresh_tokens.js";
 const migrationClient = postgres(config.db.url, { max: 1 });
@@ -20,8 +20,16 @@ app.use("/app", express.static("./app"));
 app.get("/api/healthz", handleHealthz);
 app.get("/admin/metrics", handleMetrics);
 app.get("/api/chirps", async (req, res, next) => {
+    const authorId = req.query.authorId;
+    let handler;
+    if (authorId) {
+        handler = handleGetAllChirpsByAuthor;
+    }
+    else {
+        handler = handleGetAllChirps;
+    }
     try {
-        await handleGetAllChirps(req, res);
+        await handler(req, res);
     }
     catch (err) {
         next(err);
@@ -225,8 +233,29 @@ async function handleLogin(req, res) {
     }
 }
 async function handleGetAllChirps(req, res) {
+    const sort = req.query.sort;
     try {
-        const chirps = await getChirps();
+        let chirps = await getChirps();
+        if (chirps) {
+            if (sort === 'desc') {
+                chirps = chirps.reverse();
+            }
+            return res.status(200).json(chirps);
+        }
+        return res.status(500).json({ error: "Failed to fetch chirps" });
+    }
+    catch (e) {
+        return res.status(500).json({ error: "Internal server error" });
+    }
+}
+async function handleGetAllChirpsByAuthor(req, res) {
+    const authorId = req.query.authorId;
+    if (!authorId) {
+        throw new BadRequestError("Something went wrong");
+    }
+    try {
+        const chirps = await getChirpsByAuthorId(authorId);
+        console.log(chirps);
         if (chirps) {
             return res.status(200).json(chirps);
         }

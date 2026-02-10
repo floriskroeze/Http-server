@@ -16,7 +16,6 @@ export async function createUser(user: NewUser): Promise<NewUserResponse> {
             email: users.email,
             isChirpyRed: users.isChirpyRed
         });
-    console.log(result)
     return result;
 }
 

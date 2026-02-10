@@ -11,7 +11,7 @@ import {
 	NewUserResponse,
 	updateUserData, upgradeUser
 } from "./db/queries/users.js";
-import {createChirp, deleteChirpbyId, getChirpById, getChirps} from "./db/queries/chirps.js";
+import {createChirp, deleteChirpbyId, getChirpById, getChirps, getChirpsByAuthorId} from "./db/queries/chirps.js";
 import {
 	checkPasswordHash,
 	getApiKey,
@@ -37,9 +37,18 @@ app.use("/app", express.static("./app"));
 
 app.get("/api/healthz", handleHealthz);
 app.get("/admin/metrics", handleMetrics);
-app.get("/api/chirps", async (req, res, next) => {
+app.get("/api/chirps", async (req: Request<{authorId?: string, sort?: 'asc' | 'desc'}>, res, next) => {
+	const authorId = req.query.authorId;
+	let handler;
+
+	if(authorId) {
+		handler = handleGetAllChirpsByAuthor;
+	} else {
+		handler = handleGetAllChirps;
+	}
+
 	try {
-		await handleGetAllChirps(req, res);
+		await handler(req, res);
 	} catch (err) {
 		next(err);
 	}
@@ -267,8 +276,37 @@ async function handleLogin(req: Request<{password: string, email: string}>, res:
 }
 
 async function handleGetAllChirps(req: Request, res: Response) {
+	const sort = req.query.sort;
+
 	try {
-		const chirps = await getChirps();
+		let chirps = await getChirps();
+
+		if (chirps) {
+			if (sort === 'desc') {
+				chirps = chirps.reverse();
+			}
+
+			return res.status(200).json(chirps);
+		}
+
+		return res.status(500).json({ error: "Failed to fetch chirps" });
+
+	} catch (e) {
+		return res.status(500).json({ error: "Internal server error" });
+	}
+}
+
+async function handleGetAllChirpsByAuthor(req: Request, res: Response) {
+	const authorId = req.query.authorId as string;
+
+	if (!authorId) {
+		throw new BadRequestError("Something went wrong");
+	}
+
+	try {
+		const chirps = await getChirpsByAuthorId(authorId);
+
+		console.log(chirps);
 
 		if (chirps) {
 			return res.status(200).json(chirps);
